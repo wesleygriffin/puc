@@ -44,28 +44,42 @@ int main(int argc, char* argv[]) {
 
   MPI_Init(nullptr, nullptr);
 
-  int worldRank, worldSize;
-  MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
-  MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+  int rank, numNodes;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numNodes);
+
+  int numDevices;
+  cudaError cudaResult = cudaGetDeviceCount(&numDevices);
+  if (cudaResult != cudaSuccess || numDevices == 0) {
+    std::fprintf(stderr, "No CUDA devices found");
+    MPI_Finalize();
+    std::exit(EXIT_FAILURE);
+  }
+
+  for (int i = 0; i < numDevices; ++i) {
+    cudaDeviceProp props;
+    cudaGetDeviceProperties(&props, i);
+    std::printf("rank %d CUDA device %d name: %s compute: %d.%d\n", rank, i,
+                props.name, props.major, props.minor);
+  }
 
   float* x = nullptr;
   float* y = nullptr;
-  if (worldRank == 0) {
+  if (rank == 0) {
     try {
-      x = new float[N * worldSize];
-      y = new float[N * worldSize];
+      x = new float[N * numNodes];
+      y = new float[N * numNodes];
     } catch (std::exception const& e) {
       std::fprintf(stderr, "Unable to allocate 2 %zu float arrays\n", N *
-                   worldSize);
+                   numNodes);
       MPI_Finalize();
       std::exit(EXIT_FAILURE);
     }
 
-    for (int i = 0; i < N * worldSize; ++i) x[i] = 1.f;
-    for (int i = 0; i < N * worldSize; ++i) y[i] = 2.f;
+    for (int i = 0; i < N * numNodes; ++i) x[i] = 1.f;
+    for (int i = 0; i < N * numNodes; ++i) y[i] = 2.f;
   }
 
-  cudaError cudaResult;
   int mpiResult;
 
   float* sub_x = nullptr;
@@ -138,11 +152,11 @@ int main(int argc, char* argv[]) {
   for (int i = 0; i < N; ++i) {
     error = std::max(error, std::abs(sub_y[i] - 3.f));
   }
-  std::printf("rank %d error: %g\n", worldRank, error);
+  std::printf("rank %d error: %g\n", rank, error);
 
   float* errors = nullptr;
-  if (worldRank == 0) {
-    errors = new float[worldSize];
+  if (rank == 0) {
+    errors = new float[numNodes];
   }
 
   mpiResult = MPI_Gather(&error,        // sendbuf
@@ -163,9 +177,9 @@ int main(int argc, char* argv[]) {
     std::exit(EXIT_FAILURE);
   }
 
-  if (worldRank == 0) {
+  if (rank == 0) {
     float globalError = 0.f;
-    for (int i = 0; i < worldSize; ++i) {
+    for (int i = 0; i < numNodes; ++i) {
       globalError = std::max(globalError, errors[i]);
     }
     std::printf("globalError: %g\n", globalError);
@@ -174,7 +188,7 @@ int main(int argc, char* argv[]) {
   cudaFree(sub_y);
   cudaFree(sub_x);
 
-  if (worldRank == 0) {
+  if (rank == 0) {
     delete[] errors;
     delete[] y;
     delete[] x;

@@ -1,4 +1,5 @@
 # puc
+
 This is a very small example illustrating:
 1. scattering two large arrays via MPI,
 2. computing the sum of the two arrays via CUDA,
